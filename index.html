@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Hlopoch IDE</title>
+
+<style>
+body{
+    margin:0;
+    display:flex;
+    height:100vh;
+    font-family:Arial;
+}
+
+/* ФАЙЛЫ */
+#files{
+    width:200px;
+    background:#1e1e1e;
+    color:white;
+    padding:10px;
+}
+
+/* РЕДАКТОР */
+#editor{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    position:relative;
+}
+
+textarea{
+    flex:1;
+    background:#0f172a;
+    color:#00ffcc;
+    font-family:monospace;
+    padding:10px;
+    border:none;
+    outline:none;
+}
+
+/* ПОДСКАЗКИ */
+#suggestions{
+    position:absolute;
+    background:#222;
+    color:white;
+    border:1px solid #555;
+    display:none;
+    max-height:150px;
+    overflow:auto;
+}
+
+.sug{
+    padding:5px;
+    cursor:pointer;
+}
+.sug:hover{
+    background:#444;
+}
+
+button{
+    background:#22c55e;
+    border:none;
+    padding:10px;
+    cursor:pointer;
+}
+
+/* ПРЕВЬЮ */
+#preview{
+    width:300px;
+    background:#111;
+    position:relative;
+    color:white;
+}
+</style>
+</head>
+
+<body>
+
+<div id="files">
+<b>Файлы</b><br><br>
+📄 main.hlopoch<br>
+📁 assets
+</div>
+
+<div id="editor">
+<textarea id="code"></textarea>
+
+<div id="suggestions"></div>
+
+<button onclick="run()">▶ Запустить</button>
+</div>
+
+<div id="preview"></div>
+<script>
+let textboxValue = "";
+let autoUpdate = false;
+
+/* ПАРСЕР (БЕЗ БАГА С ТОЧКОЙ) */
+function getValue(line, key){
+    let part = line.split(key)[1];
+    if(!part) return "";
+
+    // 🔥 ОТРУБАЕМ ТОЛЬКО ДРУГИЕ КЛЮЧИ, НЕ "."
+    const stopWords = [
+        "color.id:",
+        "size:",
+        "cord:",
+        "text =",
+        "/?:",
+        "If",
+        "set.textbox",
+        "set.text",
+        "set.button"
+    ];
+
+    for(let w of stopWords){
+        let idx = part.indexOf(w);
+        if(idx !== -1){
+            part = part.substring(0, idx);
+        }
+    }
+
+    return part.trim();
+}
+
+/* ПОДСКАЗКИ */
+const words = [
+"set.text",
+"set.button",
+"set.textbox",
+"color.id:",
+"size:",
+"cord:",
+"text =",
+"/?:",
+"If",
+"That:",
+"otherwise:",
+'"/?\\"',
+"_",
+"alwaysrepeat=(update-text)"
+];
+
+const textarea = document.getElementById("code");
+const sugBox = document.getElementById("suggestions");
+
+textarea.addEventListener("input", showSug);
+
+function showSug(){
+    let value = textarea.value.split(" ").pop();
+
+    sugBox.innerHTML = "";
+
+    words.forEach(w=>{
+        if(w.startsWith(value) && value.length > 0){
+            let div = document.createElement("div");
+            div.className = "sug";
+            div.innerText = w;
+
+            div.onclick = ()=>{
+                textarea.value += w + " ";
+                sugBox.style.display = "none";
+            };
+
+            sugBox.appendChild(div);
+        }
+    });
+
+    sugBox.style.display = sugBox.innerHTML ? "block":"none";
+}
+
+/* ЗАПУСК */
+function run(){
+    const code = textarea.value;
+    const preview = document.getElementById("preview");
+
+    let oldValue = textboxValue;
+
+    autoUpdate = false;
+
+    preview.innerHTML = "";
+
+    const lines = code.split("\n");
+
+    lines.forEach(line => {
+
+        /* TEXTBOX */
+        if(line.includes("set.textbox")){
+            let input = document.createElement("input");
+
+            let cord = getValue(line, "cord:");
+            let [x,y] = cord.split(",");
+
+            input.style.position = "absolute";
+            input.style.left = (x || 0) + "px";
+            input.style.top = (y || 0) + "px";
+
+            if(line.includes("/?:")){
+                let msg = line.split("/?:")[1];
+                if(msg){
+                    msg = msg.split(".")[0];
+                    msg = msg.replace("cord:", "");
+                }
+                input.placeholder = msg;
+            }
+
+            input.value = oldValue;
+
+            input.oninput = (e)=>{
+                textboxValue = e.target.value;
+
+                if(autoUpdate){
+                    run();
+                }
+            };
+
+            preview.appendChild(input);
+        }
+
+        /* BUTTON */
+        if(line.includes("set.button")){
+            let color = getValue(line, "color.id:");
+            let size = getValue(line, "size:");
+            let cord = getValue(line, "cord:");
+
+            let [w,h] = size.split(",");
+            let [x,y] = cord.split(",");
+
+            let btn = document.createElement("button");
+
+            btn.style.position = "absolute";
+            btn.style.left = (x || 0) + "px";
+            btn.style.top = (y || 0) + "px";
+            btn.style.width = (w || 50) + "px";
+            btn.style.height = (h || 20) + "px";
+            btn.style.background = color || "red";
+
+            btn.innerText = "Click";
+
+            preview.appendChild(btn);
+        }
+
+        /* TEXT */
+        if(line.includes("set.text")){
+            let text = document.createElement("div");
+
+            let color = getValue(line, "color.id:");
+            let cord = getValue(line, "cord:");
+
+            let [x,y] = cord.split(",");
+
+            text.style.position = "absolute";
+            text.style.left = (x || 0) + "px";
+            text.style.top = (y || 0) + "px";
+            text.style.color = color || "white";
+
+            if(line.includes("alwaysrepeat=(update-text)")){
+                autoUpdate = true;
+            }
+
+            if(line.includes("text =")){
+                let part = line.split("text =")[1];
+
+                if(part){
+                    part = part.replace("(", "").replace(")", "");
+
+                    part = part.replace(/"\/\?\\"/g, textboxValue);
+
+                    part = part.replace(/"/g, "");
+
+                    if(part.includes("_")){
+                        part = part.split("_").join("");
+                    }
+
+                    text.innerText = part;
+                }
+            }
+
+            preview.appendChild(text);
+        }
+
+        /* IF */
+        if(line.includes("If")){
+            let condition = line.match(/If\s*\((.*?)\)/);
+            let that = line.includes("That:") ? line.split("That:")[1] : "";
+            let otherwise = line.includes("otherwise:")
+                ? line.split("otherwise:")[1]
+                : null;
+
+            let isTrue = false;
+
+            if(condition){
+                let cond = condition[1];
+
+                cond = cond.replace(/"\/\?\\"/g, `"${textboxValue}"`);
+
+                try{
+                    isTrue = eval(cond);
+                }catch{
+                    console.error("IF error:", cond);
+                }
+            }
+
+            let action = isTrue ? that : otherwise;
+
+            if(action){
+                if(action.includes("transparency")){
+                    let value = action.match(/\d+/)[0];
+                    preview.style.opacity = 1 - (value / 100);
+                }
+            }
+        }
+
+    });
+}
+</script>
+
+</body>
+</html>
