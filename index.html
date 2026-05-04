@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>Hlopoch IDE</title>
+<title>Hlopoch IDE ULTRA+++</title>
 
 <style>
 body{
@@ -12,305 +12,504 @@ body{
     font-family:Arial;
 }
 
-/* ФАЙЛЫ */
-#files{
-    width:200px;
-    background:#1e1e1e;
-    color:white;
-    padding:10px;
-}
-
-/* РЕДАКТОР */
 #editor{
-    flex:1;
-    display:flex;
-    flex-direction:column;
+    width:40%;
+    background:#1e1e1e;
+    color:#0f0;
+    padding:10px;
     position:relative;
 }
 
 textarea{
-    flex:1;
-    background:#0f172a;
-    color:#00ffcc;
+    width:100%;
+    height:60%;
+    background:black;
+    color:#0f0;
+    border:none;
     font-family:monospace;
-    padding:10px;
-    border:none;
-    outline:none;
 }
 
-/* ПОДСКАЗКИ */
-#suggestions{
-    position:absolute;
-    background:#222;
-    color:white;
-    border:1px solid #555;
-    display:none;
-    max-height:150px;
-    overflow:auto;
-}
-
-.sug{
-    padding:5px;
-    cursor:pointer;
-}
-.sug:hover{
-    background:#444;
-}
-
-button{
-    background:#22c55e;
-    border:none;
-    padding:10px;
-    cursor:pointer;
-}
-
-/* ПРЕВЬЮ */
 #preview{
-    width:300px;
-    background:#111;
+    flex:1;
+    background:#eee;
     position:relative;
-    color:white;
+}
+
+#preview *{
+    position:absolute;
+}
+
+#assets{
+    background:#111;
+    padding:5px;
+    margin-top:5px;
+    max-height:120px;
+    overflow:auto;
+    font-size:12px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="files">
-<b>Файлы</b><br><br>
-📄 main.hlopoch<br>
-📁 assets
-</div>
-
 <div id="editor">
-<textarea id="code"></textarea>
 
-<div id="suggestions"></div>
+<button onclick="uploadImg()">📂 загрузить картинку</button>
+<button onclick="run()">▶ RUN</button>
 
-<button onclick="run()">▶ Запустить</button>
+<textarea id="code">
+start( 
+set.button 
+cord: 100,100 
+size: 150 60 найди ошыбку!
+text = (нажми) 
+color.id: lightblue 
+color.id-text: black 
+size-text: 50,10 
+cord-textIN: 0,-10 
+click?: +1score 
+set.text 
+сord: 100,200 
+size: 150,60
+text = (coin: "scoe") найди ошыбку!
+color.id: red 
+color.id-text: yellow 
+size-text: 50,10 
+cord-textIN: 0,0 
+start найди ошыбку!
+set.text 
+transparency: 1000 найди ошыбку!
+text = (молодец! давай теперь заного!) 
+alwaysrepeat=( if (score ?= 100) then (transparency: 0. wait: 10 sec. transparency: 100. set-score: 0 ) otherwise (transparency: 100) ) найди ошыбку!
+</textarea>
+
+<div id="assets"></div>
+
 </div>
 
 <div id="preview"></div>
+
 <script>
 let textboxValue = "";
-let autoUpdate = false;
+let oldValue = "";
+let elements = [];
+let imagesDB = {};
+let vars = {};
+let loops = [];
 
-/* ПАРСЕР (БЕЗ БАГА С ТОЧКОЙ) */
-function getValue(line, key){
-    let part = line.split(key)[1];
-    if(!part) return "";
+const codeEl = document.getElementById("code");
 
-    // 🔥 ОТРУБАЕМ ТОЛЬКО ДРУГИЕ КЛЮЧИ, НЕ "."
-    const stopWords = [
-        "color.id:",
-        "size:",
-        "cord:",
-        "text =",
-        "/?:",
-        "If",
-        "set.textbox",
-        "set.text",
-        "set.button"
-    ];
+/* ---------------- ПОДСВЕТКА СТРОК ---------------- */
 
-    for(let w of stopWords){
-        let idx = part.indexOf(w);
-        if(idx !== -1){
-            part = part.substring(0, idx);
+function highlightError(lineIndex){
+    let lines = codeEl.value.split("\n");
+
+    lines[lineIndex] = "🔴 " + lines[lineIndex];
+
+    codeEl.value = lines.join("\n");
+}
+
+/* ---------------- ПОДСКАЗКИ ---------------- */
+
+const commands = [
+"set.textbox","set.text","set.button",
+"img:","cord:","size:",
+"color.id:","color.id-text:",
+"size-text:","cord-textIN:",
+"text = ()","click?:",
+"set-score:","wait:","if",
+"transparency:","alwaysrepeat="
+];
+
+codeEl.addEventListener("input", () => {
+    let last = codeEl.value.split("\n").pop().toLowerCase();
+    let box = document.getElementById("suggestions");
+    if(!box) return;
+
+    let list = commands.filter(c => c.includes(last));
+
+    if(list.length === 0){
+        box.style.display="none";
+        return;
+    }
+
+    box.innerHTML="";
+    list.forEach(cmd=>{
+        let d=document.createElement("div");
+        d.className="sug";
+        d.innerText=cmd;
+
+        d.onclick=()=>{
+            insertText(cmd);
+            box.style.display="none";
+        };
+
+        box.appendChild(d);
+    });
+
+    box.style.display="block";
+});
+
+function insertText(text){
+    let lines = codeEl.value.split("\n");
+    lines[lines.length-1]=text;
+    codeEl.value = lines.join("\n");
+}
+
+/* ---------------- RUN ---------------- */
+
+async function run(){
+
+    const preview=document.getElementById("preview");
+    preview.innerHTML="";
+    elements=[];
+    loops=[];
+
+    let lines = codeEl.value.split("\n");
+    let current=null;
+
+    for(let i=0;i<lines.length;i++){
+
+        let line = lines[i].trim();
+        if(!line || line==="start(" || line===")") continue;
+
+        try{
+
+            /* ALWAYS REPEAT */
+            if(line.startsWith("alwaysrepeat=")){
+                let code=line.match(/\((.*)\)/)[1];
+                loops.push(code);
+                continue;
+            }
+
+            /* SET VAR */
+            if(line.startsWith("set-")){
+                let [name,val]=line.split(":");
+                name=name.replace("set-","").trim();
+                vars[name]=Number(val);
+                continue;
+            }
+
+            /* ELEMENTS */
+            if(line==="set.textbox"){
+                let input=document.createElement("input");
+
+                input.oninput=(e)=>{
+                    textboxValue=e.target.value;
+                    oldValue=textboxValue;
+                    updateTexts();
+                };
+
+                current={el:input};
+                preview.appendChild(input);
+                elements.push(current);
+                continue;
+            }
+
+            if(line==="set.text"){
+                let div=document.createElement("div");
+                current={el:div};
+                preview.appendChild(div);
+                elements.push(current);
+                continue;
+            }
+
+            if(line==="set.button"){
+                let btn=document.createElement("button");
+
+                btn.style.display="flex";
+                btn.style.alignItems="center";
+                btn.style.justifyContent="center";
+
+                current={el:btn};
+                preview.appendChild(btn);
+                elements.push(current);
+                continue;
+            }
+
+            /* IMAGE */
+            if(line.startsWith("img:")){
+                let src=line.split(":")[1].trim();
+                let img=document.createElement("img");
+
+                img.src = imagesDB[src] || src;
+
+                current={el:img};
+                preview.appendChild(img);
+                elements.push(current);
+                continue;
+            }
+
+            /* 🔥 ЦЕНТРАЛЬНЫЕ КООРДИНАТЫ */
+            if(line.startsWith("cord:")){
+                let [x,y]=line.split(":")[1].split(",");
+
+                current.baseX=parseInt(x);
+                current.baseY=parseInt(y);
+
+                updateTransform(current);
+                continue;
+            }
+
+            /* SIZE */
+            if(line.startsWith("size:")){
+                let [w,h]=line.split(":")[1].split(",");
+
+                current.el.style.width=w+"px";
+                current.el.style.height=h+"px";
+                continue;
+            }
+
+            /* COLORS */
+            if(line.startsWith("color.id:")){
+                current.el.style.background=line.split(":")[1];
+                continue;
+            }
+
+            if(line.startsWith("color.id-text:")){
+                current.el.style.color=line.split(":")[1];
+                continue;
+            }
+
+            /* TEXT SIZE */
+            if(line.startsWith("size-text:")){
+                let val=line.split(":")[1].split(",")[0];
+                current.el.style.fontSize=val+"px";
+                continue;
+            }
+
+            /* 🔥 TEXT OFFSET */
+            if(line.startsWith("cord-textIN:")){
+                let [x,y]=line.split(":")[1].split(",");
+
+                current.offsetX=parseInt(x);
+                current.offsetY=parseInt(y);
+
+                updateTransform(current);
+                continue;
+            }
+
+            /* TRANSPARENCY */
+            if(line.startsWith("transparency:")){
+                let val=parseInt(line.split(":")[1]);
+                current.el.style.opacity = val/100;
+                continue;
+            }
+
+            /* CLICK */
+            if(line.startsWith("click?:")){
+                let action=line.split(":")[1].trim();
+
+                current.el.onclick=()=>handleClick(action);
+                continue;
+            }
+
+            /* WAIT */
+            if(line.startsWith("wait:")){
+                let t=parseInt(line.match(/\d+/)[0])*1000;
+                await new Promise(r=>setTimeout(r,t));
+                continue;
+            }
+
+            /* IF */
+            if(line.startsWith("if")){
+                let cond=line.match(/\((.*?)\)/)?.[1];
+                let thenPart=line.match(/then\s*\((.*?)\)/)?.[1];
+                let elsePart=line.match(/otherwise\s*\((.*?)\)/)?.[1];
+
+                if(evalCond(cond)) await runChain(thenPart,current);
+                else await runChain(elsePart,current);
+                continue;
+            }
+
+            /* TEXT */
+            if(line.startsWith("text")){
+                current.rawText=line;
+                applyText(current.el,line);
+                continue;
+            }
+
+        }catch(e){
+            highlightError(i);
         }
     }
 
-    return part.trim();
+    runLoops();
 }
 
-/* ПОДСКАЗКИ */
-const words = [
-"set.text",
-"set.button",
-"set.textbox",
-"color.id:",
-"size:",
-"cord:",
-"text =",
-"/?:",
-"If",
-"That:",
-"otherwise:",
-'"/?\\"',
-"_",
-"alwaysrepeat=(update-text)"
-];
+/* ---------------- POSITION ENGINE ---------------- */
 
-const textarea = document.getElementById("code");
-const sugBox = document.getElementById("suggestions");
+function updateTransform(obj){
 
-textarea.addEventListener("input", showSug);
+    if(!obj.el) return;
 
-function showSug(){
-    let value = textarea.value.split(" ").pop();
+    let x = obj.baseX || 0;
+    let y = obj.baseY || 0;
+    let ox = obj.offsetX || 0;
+    let oy = obj.offsetY || 0;
 
-    sugBox.innerHTML = "";
+    obj.el.style.position="absolute";
+    obj.el.style.left="50%";
+    obj.el.style.top="50%";
 
-    words.forEach(w=>{
-        if(w.startsWith(value) && value.length > 0){
-            let div = document.createElement("div");
-            div.className = "sug";
-            div.innerText = w;
-
-            div.onclick = ()=>{
-                textarea.value += w + " ";
-                sugBox.style.display = "none";
-            };
-
-            sugBox.appendChild(div);
-        }
-    });
-
-    sugBox.style.display = sugBox.innerHTML ? "block":"none";
+    obj.el.style.transform =
+        `translate(-50%,-50%) translate(${x+ox}px,${y+oy}px)`;
 }
 
-/* ЗАПУСК */
-function run(){
-    const code = textarea.value;
-    const preview = document.getElementById("preview");
+/* ---------------- LOOPS ---------------- */
 
-    let oldValue = textboxValue;
+function runLoops(){
 
-    autoUpdate = false;
+    setInterval(async ()=>{
 
-    preview.innerHTML = "";
+        for(let cmd of loops){
 
-    const lines = code.split("\n");
+            if(cmd.includes("if")){
+                let cond=cmd.match(/\((.*?)\)/)?.[1];
+                let thenPart=cmd.match(/then\s*\((.*?)\)/)?.[1];
+                let elsePart=cmd.match(/otherwise\s*\((.*?)\)/)?.[1];
 
-    lines.forEach(line => {
-
-        /* TEXTBOX */
-        if(line.includes("set.textbox")){
-            let input = document.createElement("input");
-
-            let cord = getValue(line, "cord:");
-            let [x,y] = cord.split(",");
-
-            input.style.position = "absolute";
-            input.style.left = (x || 0) + "px";
-            input.style.top = (y || 0) + "px";
-
-            if(line.includes("/?:")){
-                let msg = line.split("/?:")[1];
-                if(msg){
-                    msg = msg.split(".")[0];
-                    msg = msg.replace("cord:", "");
+                if(evalCond(cond)){
+                    await runChain(thenPart);
+                }else if(elsePart){
+                    await runChain(elsePart);
                 }
-                input.placeholder = msg;
             }
 
-            input.value = oldValue;
-
-            input.oninput = (e)=>{
-                textboxValue = e.target.value;
-
-                if(autoUpdate){
-                    run();
-                }
-            };
-
-            preview.appendChild(input);
         }
 
-        /* BUTTON */
-        if(line.includes("set.button")){
-            let color = getValue(line, "color.id:");
-            let size = getValue(line, "size:");
-            let cord = getValue(line, "cord:");
+    },100);
+}
 
-            let [w,h] = size.split(",");
-            let [x,y] = cord.split(",");
+/* ---------------- CHAIN ---------------- */
 
-            let btn = document.createElement("button");
+async function runChain(code,current){
 
-            btn.style.position = "absolute";
-            btn.style.left = (x || 0) + "px";
-            btn.style.top = (y || 0) + "px";
-            btn.style.width = (w || 50) + "px";
-            btn.style.height = (h || 20) + "px";
-            btn.style.background = color || "red";
+    if(!code) return;
 
-            btn.innerText = "Click";
+    let parts = code.split(".");
 
-            preview.appendChild(btn);
+    for(let p of parts){
+
+        p=p.trim();
+
+        if(p.startsWith("wait")){
+            let t=parseInt(p.match(/\d+/)[0])*1000;
+            await new Promise(r=>setTimeout(r,t));
         }
 
-        /* TEXT */
-        if(line.includes("set.text")){
-            let text = document.createElement("div");
-
-            let color = getValue(line, "color.id:");
-            let cord = getValue(line, "cord:");
-
-            let [x,y] = cord.split(",");
-
-            text.style.position = "absolute";
-            text.style.left = (x || 0) + "px";
-            text.style.top = (y || 0) + "px";
-            text.style.color = color || "white";
-
-            if(line.includes("alwaysrepeat=(update-text)")){
-                autoUpdate = true;
-            }
-
-            if(line.includes("text =")){
-                let part = line.split("text =")[1];
-
-                if(part){
-                    part = part.replace("(", "").replace(")", "");
-
-                    part = part.replace(/"\/\?\\"/g, textboxValue);
-
-                    part = part.replace(/"/g, "");
-
-                    if(part.includes("_")){
-                        part = part.split("_").join("");
-                    }
-
-                    text.innerText = part;
-                }
-            }
-
-            preview.appendChild(text);
+        if(p.startsWith("transparency")){
+            let val=p.match(/\d+/)[0];
+            if(current) current.el.style.opacity = val/100;
         }
 
-        /* IF */
-        if(line.includes("If")){
-            let condition = line.match(/If\s*\((.*?)\)/);
-            let that = line.includes("That:") ? line.split("That:")[1] : "";
-            let otherwise = line.includes("otherwise:")
-                ? line.split("otherwise:")[1]
-                : null;
-
-            let isTrue = false;
-
-            if(condition){
-                let cond = condition[1];
-
-                cond = cond.replace(/"\/\?\\"/g, `"${textboxValue}"`);
-
-                try{
-                    isTrue = eval(cond);
-                }catch{
-                    console.error("IF error:", cond);
-                }
-            }
-
-            let action = isTrue ? that : otherwise;
-
-            if(action){
-                if(action.includes("transparency")){
-                    let value = action.match(/\d+/)[0];
-                    preview.style.opacity = 1 - (value / 100);
-                }
-            }
+        if(p.startsWith("set-")){
+            let [name,val]=p.split(":");
+            name=name.replace("set-","");
+            vars[name]=Number(val);
         }
+    }
+}
 
+/* ---------------- CLICK ---------------- */
+
+function handleClick(action){
+
+    let matches=action.match(/\+(\d+)([^\s]+)/g);
+
+    if(matches){
+        matches.forEach(m=>{
+            let num=m.match(/\d+/)[0];
+            let name=m.replace("+"+num,"");
+
+            if(!vars[name]) vars[name]=0;
+            vars[name]+=Number(num);
+        });
+    }
+
+    let t=action.match(/\+\((.*?)\)text/);
+    if(t) showGlobalText(t[1]);
+
+    updateTexts();
+}
+
+/* ---------------- TEXT ---------------- */
+
+function applyText(el,line){
+
+    let raw=line.split("=")[1];
+    if(!raw) return;
+
+    raw=raw.replace(/[()]/g,"");
+
+    for(let v in vars){
+        raw=raw.replaceAll(`"${v}"`,vars[v]);
+        raw=raw.replaceAll(v,vars[v]);
+    }
+
+    if(raw.includes("/?\\")){
+        raw=textboxValue||oldValue;
+    }
+
+    el.innerText=applyEmoji(raw);
+}
+
+/* ---------------- IF ---------------- */
+
+function evalCond(cond){
+    if(!cond) return false;
+
+    for(let v in vars){
+        cond=cond.replaceAll(v,vars[v]);
+    }
+
+    try{return eval(cond);}
+    catch{return false;}
+}
+
+/* ---------------- GLOBAL TEXT ---------------- */
+
+function showGlobalText(text){
+
+    let old=document.getElementById("global-text");
+    if(old) old.remove();
+
+    let div=document.createElement("div");
+
+    div.innerText=text;
+    div.style.position="absolute";
+    div.style.top="60px";
+    div.style.left="50px";
+    div.style.background="black";
+    div.style.color="white";
+    div.style.padding="5px";
+
+    document.getElementById("preview").appendChild(div);
+}
+
+/* ---------------- EMOJI ---------------- */
+
+function applyEmoji(text){
+    return text
+    .replace(":)", "😊")
+    .replace(":(", "😢")
+    .replace("._.", "😐")
+    .replace("=(", "😞")
+    .replace("=)", "🙂")
+    .replace(":_(", "😭")
+    .replace(":D", "😃")
+    .replace(":P", "😛")
+    .replace(";)", "😉")
+    .replace(">:(", "😠");
+}
+
+/* ---------------- UPDATE ---------------- */
+
+function updateTexts(){
+    elements.forEach(obj=>{
+        if(obj.rawText){
+            applyText(obj.el,obj.rawText);
+        }
     });
 }
 </script>
